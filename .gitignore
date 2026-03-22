@@ -1,0 +1,6 @@
+node_modules/
+.env
+vector-db/
+.mastra/
+dist/
+node_modules
