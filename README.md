@@ -7,7 +7,7 @@ Two instruction-style agents (bad vs good prompts) and one RAG agent over PDFs i
 - Node.js 20+
 - [OpenRouter](https://openrouter.ai/) API key (`OPENROUTER_API_KEY`)
 
-Chat models use the Mastra model router (`openrouter/...`). Embeddings call OpenRouter’s OpenAI-compatible `/v1/embeddings` endpoint with `openai/text-embedding-3-small` (same API key).
+Chat models use the Mastra model router: **`openrouter/openai/gpt-5.4-nano`**. Embeddings call OpenRouter’s OpenAI-compatible `/v1/embeddings` endpoint with `openai/text-embedding-3-small` (same API key).
 
 **Memory:** All agents use `@mastra/memory` with the last **20** messages per thread and **auto thread titles**. Data is stored in `./vector-db/mastra-storage.db` (separate from RAG vectors in `cleaning.db`).
 

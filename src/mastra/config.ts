@@ -1,7 +1,7 @@
 import { ModelRouterEmbeddingModel } from '@mastra/core/llm'
 
 /** OpenRouter chat model for all demo agents */
-export const DEMO_CHAT_MODEL = 'openrouter/openai/gpt-4o-mini' as const
+export const DEMO_CHAT_MODEL = 'openrouter/openai/gpt-5.4-nano' as const
 
 export const CLEANING_DOCS_INDEX = 'cleaning_docs' as const
 
