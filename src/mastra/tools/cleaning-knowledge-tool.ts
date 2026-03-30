@@ -8,7 +8,7 @@ const embeddingModel = createOpenRouterEmbeddingModel()
  * Semantic search over indexed HR / employee-benefits PDFs (seeded via npm run seed).
  * Registered vector store key must match Mastra `vectors` (see index.ts).
  */
-export const cleaningKnowledgeTool = createVectorQueryTool({
+export const hrKnowledgeTool = createVectorQueryTool({
   vectorStoreName: 'libsqlVector',
   indexName: HR_DOCS_INDEX,
   model: embeddingModel,

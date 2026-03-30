@@ -9,6 +9,7 @@ import { DEMO_CHAT_MODEL } from '../config.js'
 export const goodInstructionAgent = new Agent({
   id: 'good-instruction-agent',
   name: 'Good Instruction (HR)',
+  description: 'KMS HR specialist that provides structured, well-sourced answers about policies, health insurance, and company benefits.',
   instructions: `
 Role: You are a KMS HR specialist with expertise in employee benefits, health insurance,
 overtime policy, and company handbook guidelines.

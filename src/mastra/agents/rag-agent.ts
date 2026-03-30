@@ -2,7 +2,7 @@ import { Agent } from '@mastra/core/agent'
 
 import { agentMemory } from '../agent-memory.js'
 import { DEMO_CHAT_MODEL } from '../config.js'
-import { cleaningKnowledgeTool } from '../tools/cleaning-knowledge-tool.js'
+import { hrKnowledgeTool } from '../tools/cleaning-knowledge-tool.js'
 
 /**
  * RAG demo: model decides when to retrieve; Studio shows tool calls + context.
@@ -10,6 +10,7 @@ import { cleaningKnowledgeTool } from '../tools/cleaning-knowledge-tool.js'
 export const ragAgent = new Agent({
   id: 'rag-agent',
   name: 'RAG HR Knowledge',
+  description: 'Answers KMS employee questions about HR policies and benefits by searching the knowledge base.',
   instructions: `
 You answer questions about KMS employee policies and benefits using the HR knowledge base tool.
 
@@ -22,5 +23,5 @@ Rules:
 `,
   model: DEMO_CHAT_MODEL,
   memory: agentMemory,
-  tools: { cleaningKnowledgeTool },
+  tools: { hrKnowledgeTool },
 })

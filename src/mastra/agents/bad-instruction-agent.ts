@@ -9,6 +9,7 @@ import { agentMemory } from '../agent-memory.js'
 export const badInstructionAgent = new Agent({
   id: 'bad-instruction-agent',
   name: 'Bad Instruction (HR)',
+  description: 'General HR assistant with intentionally vague instructions — used for demo comparison.',
   instructions:
     'You are an HR assistant. Help the user with their questions. Be thorough and professional.',
   model: DEMO_CHAT_MODEL,
