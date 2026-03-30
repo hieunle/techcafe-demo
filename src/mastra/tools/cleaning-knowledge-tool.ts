@@ -1,18 +1,18 @@
 import { createVectorQueryTool } from '@mastra/rag'
 
-import { CLEANING_DOCS_INDEX, createOpenRouterEmbeddingModel } from '../config.js'
+import { HR_DOCS_INDEX, createOpenRouterEmbeddingModel } from '../config.js'
 
 const embeddingModel = createOpenRouterEmbeddingModel()
 
 /**
- * Semantic search over indexed cleaning training PDFs (seeded via npm run seed).
- * Registered vector store key must match Mastra \`vectors\` (see index.ts).
+ * Semantic search over indexed HR / employee-benefits PDFs (seeded via npm run seed).
+ * Registered vector store key must match Mastra `vectors` (see index.ts).
  */
 export const cleaningKnowledgeTool = createVectorQueryTool({
   vectorStoreName: 'libsqlVector',
-  indexName: CLEANING_DOCS_INDEX,
+  indexName: HR_DOCS_INDEX,
   model: embeddingModel,
-  id: 'search-cleaning-knowledge',
+  id: 'search-hr-knowledge',
   description:
-    'Search Electrodry cleaning knowledge base (training PDFs): carpet & tile procedures, products, mixing ratios, fibre types, stains, and safety notes. Call this before answering domain questions.',
+    'Search the KMS HR knowledge base (company handbook, health insurance benefits & claim forms, overtime policy). Call this before answering any employee questions about policies, benefits, or procedures.',
 })

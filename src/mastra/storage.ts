@@ -7,7 +7,7 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 
 /**
  * Shared LibSQL persistence for Mastra (memory threads/messages) and Studio.
- * RAG document vectors stay in {@link ./vector-store.ts} (`cleaning.db`).
+ * RAG document vectors stay in {@link ./vector-store.ts} (`cleaning.db` — HR docs index).
  */
 export const mastraStorage = new LibSQLStore({
   id: 'mastra-libsql-storage',

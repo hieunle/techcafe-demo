@@ -3,7 +3,10 @@ import { ModelRouterEmbeddingModel } from '@mastra/core/llm'
 /** OpenRouter chat model for all demo agents */
 export const DEMO_CHAT_MODEL = 'openrouter/openai/gpt-5.4-nano' as const
 
-export const CLEANING_DOCS_INDEX = 'cleaning_docs' as const
+export const HR_DOCS_INDEX = 'hr_docs' as const
+
+/** @deprecated use HR_DOCS_INDEX */
+export const CLEANING_DOCS_INDEX = HR_DOCS_INDEX
 
 /** text-embedding-3-small default dimensions */
 export const EMBEDDING_DIMENSIONS = 1536

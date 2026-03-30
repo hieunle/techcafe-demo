@@ -9,16 +9,16 @@ import { cleaningKnowledgeTool } from '../tools/cleaning-knowledge-tool.js'
  */
 export const ragAgent = new Agent({
   id: 'rag-agent',
-  name: 'RAG Cleaning Knowledge',
+  name: 'RAG HR Knowledge',
   instructions: `
-You answer questions about Electrodry cleaning operations using the knowledge base tool.
+You answer questions about KMS employee policies and benefits using the HR knowledge base tool.
 
 Rules:
-- For any question about procedures, products, mixing ratios, carpet/tile/fibre, or stains:
-  call the cleaning knowledge search tool first with a short, focused queryText (and topK around 5–8).
+- For any question about policies, health insurance, claim procedures, overtime, or company benefits:
+  call the HR knowledge search tool first with a short, focused queryText (and topK around 5–8).
 - Base factual claims only on retrieved passages; if the tool returns nothing useful, say you could not find it in the docs.
 - After retrieval, synthesize a clear answer. Mention document source titles from metadata when helpful.
-- Keep safety warnings when the sources include them.
+- If the source includes deadlines, limits, or eligibility criteria, always include them.
 `,
   model: DEMO_CHAT_MODEL,
   memory: agentMemory,

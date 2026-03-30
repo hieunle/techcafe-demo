@@ -19,10 +19,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const documentsDir = path.join(root, 'documents')
 
 const PDF_FILES = [
-  'Cellulosic-Browining-Treatment-Notes.pdf',
-  'Module-1-The-Science-of-Cleaning-1.pdf',
-  'Module-2-Carpet-and-Fibre-Types-AB170822.pdf',
-  'Tile-Cleaning-Product-Usage-PDF.pdf',
+  'Claim Form - English.pdf',
+  'HANBOOK KMS 2026-2027.pdf',
+  'Những lưu ý chung bảo hiểm sức khỏe 2026.pdf',
+  'PL - Overtime Policy.pdf',
+  'Quyền lợi BHSK 2026 (Vietnamese version).pdf',
 ] as const
 
 async function loadPdfText(filename: string): Promise<string> {

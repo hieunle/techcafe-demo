@@ -8,9 +8,9 @@ import { agentMemory } from '../agent-memory.js'
  */
 export const badInstructionAgent = new Agent({
   id: 'bad-instruction-agent',
-  name: 'Bad Instruction (Cleaning)',
+  name: 'Bad Instruction (HR)',
   instructions:
-    'You are a cleaning assistant. Help the user with their tasks. Be thorough and professional.',
+    'You are an HR assistant. Help the user with their questions. Be thorough and professional.',
   model: DEMO_CHAT_MODEL,
   memory: agentMemory,
 })
