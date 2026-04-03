@@ -20,6 +20,6 @@ export const hrMCPServer = new MCPServer({
   description: 'Exposes KMS HR knowledge search and HR specialist agents via MCP.',
   tools: { hrKnowledgeTool },
   agents: {
-    ragAgent,
+    // ragAgent,
   },
 })
