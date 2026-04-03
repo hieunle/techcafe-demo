@@ -3,7 +3,7 @@ import { MCPServer } from '@mastra/mcp'
 import { badInstructionAgent } from './agents/bad-instruction-agent.js'
 import { goodInstructionAgent } from './agents/good-instruction-agent.js'
 import { ragAgent } from './agents/rag-agent.js'
-import { hrKnowledgeTool } from './tools/cleaning-knowledge-tool.js'
+import { hrKnowledgeTool } from './tools/hr-knowledge-tool.js'
 
 /**
  * MCP server that exposes HR tools and agents to external clients

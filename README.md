@@ -28,7 +28,7 @@ npm run dev    # Studio → http://localhost:4111
 |--------|---------|
 | **Bad Instruction (Cleaning)** | Vague prompt — compare answers to the good agent |
 | **Good Instruction (Cleaning)** | Role / Task / Boundaries / Output |
-| **RAG Cleaning Knowledge** | Uses `search-cleaning-knowledge` vector tool on indexed PDFs |
+| **RAG HR Knowledge** | Uses `search-hr-knowledge` vector tool on indexed PDFs |
 
 ## Try in Studio
 
@@ -40,5 +40,5 @@ npm run dev    # Studio → http://localhost:4111
 - `src/mastra/index.ts` — Mastra app + storage + LibSQL vector store
 - `src/mastra/storage.ts` / `agent-memory.ts` — LibSQL + shared `Memory` config
 - `src/mastra/agents/` — agents
-- `src/mastra/tools/cleaning-knowledge-tool.ts` — `createVectorQueryTool`
+- `src/mastra/tools/hr-knowledge-tool.ts` — `createVectorQueryTool`
 - `scripts/seed.ts` — PDF → chunks → embeddings → LibSQL

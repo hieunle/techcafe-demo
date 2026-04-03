@@ -2,7 +2,7 @@ import { Agent } from '@mastra/core/agent'
 
 import { agentMemory } from '../agent-memory.js'
 import { DEMO_CHAT_MODEL } from '../config.js'
-import { hrKnowledgeTool } from '../tools/cleaning-knowledge-tool.js'
+import { hrKnowledgeTool } from '../tools/hr-knowledge-tool.js'
 
 /**
  * RAG demo: model decides when to retrieve; Studio shows tool calls + context.
