@@ -14,13 +14,65 @@
   --ba-font: 'Inter', -apple-system, sans-serif;
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  max-width: 860px;
-  margin: 0 auto;
+  height: 100%;
+  width: 100%;
   background: var(--ba-bg);
   font-family: var(--ba-font);
   color: var(--ba-text);
   font-size: 14px;
+}
+
+/* ── Body: horizontal split ── */
+.body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Chat column (left) ── */
+.chatArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── Questions side panel (right) ── */
+.sidePanel {
+  width: 340px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--ba-border);
+  background: var(--ba-surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidePanelEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  color: var(--ba-text-muted);
+  opacity: 0.45;
+}
+
+.sidePanelEmptyTitle {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ba-text-muted);
+}
+
+.sidePanelEmptyHint {
+  font-size: 0.73rem;
+  line-height: 1.5;
+  max-width: 220px;
 }
 
 /* ── Header ── */
@@ -121,7 +173,7 @@
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1.25rem 1.25rem 0;
+  padding: 1.25rem 1.25rem 1rem;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -188,11 +240,9 @@
 }
 
 .bubble {
-  padding: 0.6rem 0.9rem;
+  padding: 0.7rem 1rem;
   border-radius: var(--ba-radius);
-  line-height: 1.65;
   word-break: break-word;
-  white-space: pre-wrap;
   font-size: 0.875rem;
 }
 
@@ -201,12 +251,15 @@
   color: #fff;
   border-bottom-right-radius: 4px;
   align-self: flex-end;
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 .assistantBubble {
   background: var(--ba-surface2);
   border: 1px solid var(--ba-border);
   border-bottom-left-radius: 4px;
+  /* line-height/white-space controlled by MarkdownMessage inside */
 }
 
 /* ── Image preview in message ── */
@@ -287,33 +340,33 @@
   font-size: 0.82rem;
 }
 
-/* ── Questions panel ── */
+/* ── Questions panel (inside right side panel) ── */
 .panel {
-  flex-shrink: 0;
-  margin: 0 1.25rem;
-  border: 1px solid var(--ba-border);
-  border-radius: 12px;
-  background: var(--ba-surface2);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  background: transparent;
 }
 
 .panelHeader {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 0.55rem 1rem;
-  background: var(--ba-surface);
+  padding: 0.75rem 1rem;
+  background: var(--ba-surface2);
   border-bottom: 1px solid var(--ba-border);
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--ba-accent-light);
+  flex-shrink: 0;
 }
 
 .panelQuestions {
   display: flex;
   flex-direction: column;
   gap: 0;
-  max-height: 260px;
+  flex: 1;
   overflow-y: auto;
 }
 
@@ -330,11 +383,54 @@
 
 .question:last-child { border-bottom: none; }
 
+.questionHeader {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
 .questionText {
   font-size: 0.83rem;
   font-weight: 500;
   color: var(--ba-text);
   line-height: 1.4;
+  margin: 0;
+  width: 100%;
+}
+
+.selectBadgeSingle,
+.selectBadgeMulti {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.22rem 0.5rem;
+  border-radius: 5px;
+  border: 1px solid var(--ba-border);
+  color: var(--ba-text-muted);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.selectBadgeSingle {
+  border-color: rgba(139, 132, 255, 0.45);
+  color: var(--ba-accent-light);
+  background: rgba(139, 132, 255, 0.1);
+}
+
+.selectBadgeMulti {
+  border-color: rgba(110, 231, 183, 0.35);
+  color: #9ae6c9;
+  background: rgba(110, 231, 183, 0.08);
+}
+
+.selectHint {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--ba-text-muted);
+  opacity: 0.92;
 }
 
 .options {
@@ -389,10 +485,12 @@
 .customInput:disabled { opacity: 0.5; }
 
 .panelFooter {
-  padding: 0.65rem 1rem;
+  padding: 0.75rem 1rem;
   border-top: 1px solid var(--ba-border);
   display: flex;
   justify-content: flex-end;
+  flex-shrink: 0;
+  background: var(--ba-surface2);
 }
 
 .submitBtn {
@@ -529,3 +627,165 @@
   color: var(--ba-text-muted);
   text-align: center;
 }
+
+/* ── Web search tool card ── */
+.searchCard {
+  display: flex;
+  flex-direction: column;
+  background: var(--ba-surface2);
+  border: 1px solid var(--ba-border);
+  border-radius: 9px;
+  font-size: 0.78rem;
+  margin-bottom: 4px;
+  overflow: hidden;
+}
+
+.searchCardDone {
+  border-color: #2a4a2a;
+  background: #141f14;
+}
+
+.searchHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  cursor: default;
+  width: 100%;
+  text-align: left;
+}
+
+.searchCardDone .searchHeader {
+  cursor: pointer;
+}
+
+.searchCardDone .searchHeader:hover {
+  background: rgba(255,255,255,0.02);
+}
+
+.searchIcon {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: #1a2a1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #6fcf6f;
+}
+
+.searchLabel {
+  color: var(--ba-text-muted);
+  font-size: 0.76rem;
+  flex-shrink: 0;
+}
+
+.searchCardDone .searchLabel {
+  color: #a8c8a8;
+}
+
+.searchQueryInline {
+  font-size: 0.71rem;
+  color: var(--ba-text-muted);
+  opacity: 0.65;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.searchBadge {
+  font-size: 0.63rem;
+  background: #2a4a2a;
+  color: #6fcf6f;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.searchExpand {
+  font-size: 0.53rem;
+  color: var(--ba-text-muted);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.searchSpinner {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid #2a4a2a;
+  border-top-color: #6fcf6f;
+  border-radius: 50%;
+  animation: searchSpin 0.7s linear infinite;
+}
+
+@keyframes searchSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Expanded search body ── */
+.searchBody {
+  border-top: 1px solid #2a4a2a;
+  display: flex;
+  flex-direction: column;
+}
+
+.searchSection {
+  padding: 0.55rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-bottom: 1px solid #2a4a2a;
+}
+
+.searchSection:last-child {
+  border-bottom: none;
+}
+
+.searchSectionLabel {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ba-text-muted);
+  opacity: 0.55;
+}
+
+.searchAnswerText {
+  font-size: 0.73rem;
+  color: var(--ba-text);
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+.searchSources {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.searchSourceLink {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  color: var(--ba-accent-light);
+  text-decoration: none;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchSourceLink:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+

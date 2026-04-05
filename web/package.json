@@ -8,11 +8,13 @@
     "start": "next start"
   },
   "dependencies": {
-    "@ai-sdk/react": "^3.0.147",
-    "ai": "^5.0.166",
+    "@ai-sdk/react": "^3.0.148",
+    "ai": "^6.0.146",
     "next": "^15.3.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

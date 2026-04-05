@@ -1,263 +1,202 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useChat } from '@ai-sdk/react'
+import { DefaultChatTransport } from 'ai'
 import styles from './chat.module.css'
+import { MarkdownMessage } from './markdown-message'
 
-/* ── Types ── */
-type TextPart = { type: 'text'; text: string }
-
-type ToolCallPart = {
-  type: 'tool-call'
-  toolCallId: string
-  toolName: string
-  args: Record<string, unknown>
-  status: 'calling' | 'done'
-  resultCount?: number
+/* ── Tool helpers ── */
+const TOOL_META: Record<string, { label: string; inputKey: string }> = {
+  hrKnowledgeTool: { label: 'HR Knowledge Base', inputKey: 'queryText' },
+  webSearchTool:   { label: 'Web Search',         inputKey: 'query' },
 }
 
-type MessagePart = TextPart | ToolCallPart
-
-interface Message {
-  id: string
-  role: 'user' | 'assistant'
-  parts: MessagePart[]
+function getToolMeta(toolKey: string) {
+  return TOOL_META[toolKey] ?? { label: toolKey, inputKey: 'query' }
 }
 
-type Status = 'idle' | 'streaming' | 'error'
+/* ── Relevant-context renderer (RAG tool output) ── */
+interface RelevantDoc {
+  pageContent: string
+  metadata: Record<string, unknown>
+}
 
-/* ── Hook ── */
-function useMastraChat() {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [status, setStatus] = useState<Status>('idle')
-  const [error, setError] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-
-  const sendMessage = useCallback(
-    async (text: string) => {
-      setError(null)
-      setStatus('streaming')
-
-      const userMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        parts: [{ type: 'text', text }],
-      }
-      const assistantId = crypto.randomUUID()
-      const assistantMsg: Message = {
-        id: assistantId,
-        role: 'assistant',
-        parts: [],
-      }
-
-      setMessages((prev) => [...prev, userMsg, assistantMsg])
-
-      abortRef.current?.abort()
-      abortRef.current = new AbortController()
-
-      // Build plain content history for Mastra
-      const history = [...messages, userMsg].map((m) => ({
-        role: m.role,
-        content: m.parts
-          .filter((p): p is TextPart => p.type === 'text')
-          .map((p) => p.text)
-          .join(''),
-      }))
-
-      try {
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: history }),
-          signal: abortRef.current.signal,
-        })
-
-        if (!res.ok) throw new Error(`Server error ${res.status}`)
-
-        const reader = res.body!.getReader()
-        const decoder = new TextDecoder()
-        let buf = ''
-        // accumulate args text per toolCallId
-        const argsMap: Record<string, string> = {}
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true })
-          const lines = buf.split('\n')
-          buf = lines.pop() ?? ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data:')) continue
-            const raw = line.slice(5).trim()
-            if (!raw || raw === '[DONE]') continue
-
-            let event: { type: string; payload: Record<string, unknown> }
-            try {
-              event = JSON.parse(raw)
-            } catch {
-              continue
-            }
-
-            const { type, payload } = event
-
-            if (type === 'tool-call-input-streaming-start') {
-              const { toolCallId, toolName } = payload as {
-                toolCallId: string
-                toolName: string
-              }
-              argsMap[toolCallId] = ''
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        parts: [
-                          ...m.parts,
-                          {
-                            type: 'tool-call',
-                            toolCallId,
-                            toolName,
-                            args: {},
-                            status: 'calling',
-                          } satisfies ToolCallPart,
-                        ],
-                      }
-                    : m,
-                ),
-              )
-            } else if (type === 'tool-call-delta') {
-              const { toolCallId, argsTextDelta } = payload as {
-                toolCallId: string
-                argsTextDelta: string
-              }
-              if (toolCallId in argsMap) {
-                argsMap[toolCallId] += argsTextDelta
-              }
-            } else if (type === 'tool-call') {
-              const { toolCallId, args } = payload as {
-                toolCallId: string
-                toolName: string
-                args: Record<string, unknown>
-              }
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        parts: m.parts.map((p) =>
-                          p.type === 'tool-call' && p.toolCallId === toolCallId
-                            ? { ...p, args }
-                            : p,
-                        ),
-                      }
-                    : m,
-                ),
-              )
-            } else if (type === 'tool-result') {
-              const { toolCallId, result } = payload as {
-                toolCallId: string
-                result: { relevantContext?: unknown[] }
-              }
-              const count = result?.relevantContext?.length ?? 0
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        parts: m.parts.map((p) =>
-                          p.type === 'tool-call' && p.toolCallId === toolCallId
-                            ? { ...p, status: 'done', resultCount: count }
-                            : p,
-                        ),
-                      }
-                    : m,
-                ),
-              )
-            } else if (type === 'text-delta') {
-              const { text: chunk } = (payload as { id: string; text: string })
-              setMessages((prev) =>
-                prev.map((m) => {
-                  if (m.id !== assistantId) return m
-                  const parts = [...m.parts]
-                  const last = parts[parts.length - 1]
-                  if (last?.type === 'text') {
-                    parts[parts.length - 1] = {
-                      ...last,
-                      text: last.text + chunk,
-                    }
-                  } else {
-                    parts.push({ type: 'text', text: chunk })
-                  }
-                  return { ...m, parts }
-                }),
-              )
-            }
-          }
-        }
-
-        setStatus('idle')
-      } catch (err: unknown) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          setStatus('idle')
-          return
-        }
-        const msg = err instanceof Error ? err.message : 'Unknown error'
-        setError(msg)
-        setStatus('error')
-        setMessages((prev) =>
-          prev.filter((m) => !(m.id === assistantId && m.parts.length === 0)),
-        )
-      }
-    },
-    [messages],
+function KnowledgeOutput({ docs }: { docs: RelevantDoc[] }) {
+  return (
+    <div className={styles.toolOutputDocs}>
+      <span className={styles.toolOutputSummary}>
+        {docs.length} chunk{docs.length !== 1 ? 's' : ''} retrieved
+      </span>
+      {docs.slice(0, 4).map((doc, i) => (
+        <div key={i} className={styles.docChunk}>
+          <p className={styles.docSource}>
+            {String(doc.metadata?.source ?? doc.metadata?.title ?? `Chunk ${i + 1}`)}
+          </p>
+          <p className={styles.docSnippet}>
+            {doc.pageContent.slice(0, 220)}{doc.pageContent.length > 220 ? '…' : ''}
+          </p>
+        </div>
+      ))}
+    </div>
   )
-
-  return { messages, status, error, sendMessage }
 }
 
-/* ── Tool call card ── */
-function ToolCallCard({ part }: { part: ToolCallPart }) {
-  const query = (part.args?.queryText as string) ?? ''
-  const done = part.status === 'done'
+/* ── Web-search output renderer (BA tool output) ── */
+interface SearchOutput {
+  answer?: string
+  sources?: { url: string; title: string }[]
+  searchCount?: number
+}
+
+function SearchOutput({ result }: { result: SearchOutput }) {
+  return (
+    <div className={styles.toolOutputSearch}>
+      {result.answer && <p className={styles.searchAnswer}>{result.answer.slice(0, 300)}{result.answer.length > 300 ? '…' : ''}</p>}
+      {(result.sources ?? []).slice(0, 3).map((s, i) => (
+        <a key={i} href={s.url} target="_blank" rel="noreferrer" className={styles.searchSource}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+          {s.title || s.url}
+        </a>
+      ))}
+    </div>
+  )
+}
+
+/* ── Tool detail card ── */
+type ToolPart = {
+  type: string
+  state: 'input-streaming' | 'input-available' | 'output-available' | 'output-error'
+  input: Record<string, unknown>
+  output?: unknown
+  errorText?: string
+}
+
+function ToolDetailCard({ part }: { part: ToolPart }) {
+  const [expanded, setExpanded] = useState(false)
+  const toolKey  = part.type.replace(/^tool-/, '')
+  const meta     = getToolMeta(toolKey)
+  const isLoading = part.state === 'input-streaming' || part.state === 'input-available'
+  const isDone    = part.state === 'output-available'
+  const isError   = part.state === 'output-error'
+  const query     = (part.input?.[meta.inputKey] as string) ?? ''
+
+  const output = part.output as Record<string, unknown> | undefined
 
   return (
-    <div className={`${styles.toolCard} ${done ? styles.toolCardDone : ''}`}>
-      <div className={styles.toolHeader}>
+    <div className={`${styles.toolCard} ${isDone ? styles.toolCardDone : ''} ${isError ? styles.toolCardError : ''}`}>
+      {/* Header — always visible */}
+      <button
+        type="button"
+        className={styles.toolHeader}
+        onClick={() => (isDone || isError) && setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
         <span className={styles.toolIcon}>
-          {done ? (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          {isError ? (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          ) : isDone ? (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="20 6 9 17 4 12" />
             </svg>
           ) : (
             <span className={styles.toolSpinner} />
           )}
         </span>
-        <span className={styles.toolName}>
-          {done ? 'Searched HR knowledge base' : 'Searching HR knowledge base…'}
-        </span>
-      </div>
-      {query && (
-        <div className={styles.toolMeta}>
-          <span className={styles.toolMetaLabel}>Query</span>
-          <span className={styles.toolMetaValue}>&ldquo;{query}&rdquo;</span>
+
+        <div className={styles.toolHeaderText}>
+          <span className={styles.toolName}>{meta.label}</span>
+          {query && <span className={styles.toolQuery}>&ldquo;{query}&rdquo;</span>}
+          {isError && <span className={styles.toolErrLabel}>Error</span>}
+          {isDone && toolKey === 'hrKnowledgeTool' && (
+            <span className={styles.toolResultBadge}>
+              {((output?.relevantContext ?? []) as RelevantDoc[]).length} chunks
+            </span>
+          )}
+          {isDone && toolKey === 'webSearchTool' && (
+            <span className={styles.toolResultBadge}>
+              {((output?.sources ?? []) as unknown[]).length} sources
+            </span>
+          )}
         </div>
-      )}
-      {done && part.resultCount !== undefined && (
-        <div className={styles.toolMeta}>
-          <span className={styles.toolMetaLabel}>Found</span>
-          <span className={styles.toolMetaValue}>{part.resultCount} document{part.resultCount !== 1 ? 's' : ''}</span>
+
+        {(isDone || isError) && (
+          <span className={styles.toolExpandIcon} aria-hidden>
+            {expanded ? '▲' : '▼'}
+          </span>
+        )}
+      </button>
+
+      {/* Expandable body */}
+      {expanded && (
+        <div className={styles.toolBody}>
+          {/* Input section */}
+          <div className={styles.toolSection}>
+            <span className={styles.toolSectionLabel}>Input</span>
+            <pre className={styles.toolCode}>{JSON.stringify(part.input, null, 2)}</pre>
+          </div>
+
+          {/* Output section */}
+          {isDone && (
+            <div className={styles.toolSection}>
+              <span className={styles.toolSectionLabel}>Output</span>
+              {toolKey === 'hrKnowledgeTool' && output?.relevantContext ? (
+                <KnowledgeOutput docs={(output.relevantContext as RelevantDoc[])} />
+              ) : toolKey === 'webSearchTool' ? (
+                <SearchOutput result={output as SearchOutput} />
+              ) : (
+                <pre className={styles.toolCode}>{JSON.stringify(output, null, 2)}</pre>
+              )}
+            </div>
+          )}
+
+          {isError && (
+            <div className={styles.toolSection}>
+              <span className={styles.toolSectionLabel}>Error</span>
+              <p className={styles.toolErrorText}>{part.errorText}</p>
+            </div>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-/* ── Chat UI ── */
-export default function Chat() {
-  const { messages, status, error, sendMessage } = useMastraChat()
+/* ── Chat component ── */
+interface ChatProps {
+  agentId: string
+  title: string
+  subtitle: string
+  color?: string
+  placeholder?: string
+  emptyTitle?: string
+  emptyHint?: string
+  icon?: React.ReactNode
+}
+
+export default function Chat({
+  agentId,
+  title,
+  subtitle,
+  color = 'var(--accent)',
+  placeholder = 'Type a message…',
+  emptyTitle = 'Start a conversation',
+  emptyHint = 'Ask anything to get started.',
+  icon,
+}: ChatProps) {
+  const { messages, sendMessage, status } = useChat({
+    transport: new DefaultChatTransport({ api: `/api/agents/${agentId}` }),
+  })
+
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
-  const isLoading = status === 'streaming'
+  const isLoading = status === 'submitted' || status === 'streaming'
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -267,24 +206,31 @@ export default function Chat() {
     e.preventDefault()
     const text = input.trim()
     if (!text || isLoading) return
-    sendMessage(text)
+    sendMessage({ text })
     setInput('')
   }
+
+  const defaultIcon = (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2L2 7l10 5 10-5-10-5z" />
+      <path d="M2 17l10 5 10-5" />
+      <path d="M2 12l10 5 10-5" />
+    </svg>
+  )
 
   return (
     <div className={styles.shell}>
       <header className={styles.header}>
         <div className={styles.headerInner}>
-          <div className={styles.avatar}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5z" />
-              <path d="M2 17l10 5 10-5" />
-              <path d="M2 12l10 5 10-5" />
-            </svg>
+          <div
+            className={styles.avatar}
+            style={{ background: `linear-gradient(135deg, ${color}, ${color}99)` }}
+          >
+            {icon ?? defaultIcon}
           </div>
           <div>
-            <h1 className={styles.title}>HR Knowledge Assistant</h1>
-            <p className={styles.subtitle}>Powered by RAG — KMS Policies &amp; Benefits</p>
+            <h1 className={styles.title}>{title}</h1>
+            <p className={styles.subtitle}>{subtitle}</p>
           </div>
         </div>
       </header>
@@ -299,19 +245,22 @@ export default function Chat() {
                 <path d="M12 17h.01" />
               </svg>
             </div>
-            <p className={styles.emptyTitle}>Ask about HR policies</p>
-            <p className={styles.emptyHint}>Try: &ldquo;What is the health insurance claim procedure?&rdquo;</p>
+            <p className={styles.emptyTitle}>{emptyTitle}</p>
+            <p className={styles.emptyHint}>{emptyHint}</p>
           </div>
         )}
 
-        {messages.map((m) => (
+        {messages.map((message) => (
           <div
-            key={m.id}
-            className={`${styles.messageRow} ${m.role === 'user' ? styles.userRow : styles.assistantRow}`}
+            key={message.id}
+            className={`${styles.messageRow} ${message.role === 'user' ? styles.userRow : styles.assistantRow}`}
           >
-            {m.role === 'assistant' && (
-              <div className={styles.msgAvatar}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            {message.role === 'assistant' && (
+              <div
+                className={styles.msgAvatar}
+                style={{ background: `linear-gradient(135deg, ${color}, ${color}99)` }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 2L2 7l10 5 10-5-10-5z" />
                   <path d="M2 17l10 5 10-5" />
                   <path d="M2 12l10 5 10-5" />
@@ -320,43 +269,48 @@ export default function Chat() {
             )}
 
             <div className={styles.assistantContent}>
-              {m.parts.map((part, i) =>
-                part.type === 'tool-call' ? (
-                  <ToolCallCard key={i} part={part} />
-                ) : (
-                  <div
-                    key={i}
-                    className={`${styles.bubble} ${m.role === 'user' ? styles.userBubble : styles.assistantBubble}`}
-                  >
-                    {part.text || (
-                      <span className={styles.typing}>
-                        <span /><span /><span />
-                      </span>
-                    )}
-                  </div>
-                ),
-              )}
-              {m.role === 'assistant' && m.parts.length === 0 && (
+              {message.parts.map((part, i) => {
+                /* Text bubble */
+                if (part.type === 'text') {
+                  if (!part.text && message.role === 'assistant') {
+                    return (
+                      <div key={i} className={`${styles.bubble} ${styles.assistantBubble}`}>
+                        <span className={styles.typing}><span /><span /><span /></span>
+                      </div>
+                    )
+                  }
+                  if (!part.text) return null
+                  return (
+                    <div
+                      key={i}
+                      className={`${styles.bubble} ${message.role === 'user' ? styles.userBubble : styles.assistantBubble}`}
+                    >
+                      {message.role === 'assistant' ? (
+                        <MarkdownMessage content={part.text} accentColor={color} />
+                      ) : (
+                        part.text
+                      )}
+                    </div>
+                  )
+                }
+
+                /* Tool call card */
+                if (part.type.startsWith('tool-')) {
+                  return <ToolDetailCard key={i} part={part as ToolPart} />
+                }
+
+                return null
+              })}
+
+              {/* Fallback typing indicator when no parts yet */}
+              {message.role === 'assistant' && message.parts.length === 0 && (
                 <div className={`${styles.bubble} ${styles.assistantBubble}`}>
-                  <span className={styles.typing}>
-                    <span /><span /><span />
-                  </span>
+                  <span className={styles.typing}><span /><span /><span /></span>
                 </div>
               )}
             </div>
           </div>
         ))}
-
-        {error && (
-          <div className={styles.errorBanner}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            {error}
-          </div>
-        )}
 
         <div ref={bottomRef} />
       </main>
@@ -367,7 +321,7 @@ export default function Chat() {
             className={styles.input}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about HR policies, benefits, overtime..."
+            placeholder={placeholder}
             disabled={isLoading}
             autoFocus
           />
@@ -377,15 +331,17 @@ export default function Chat() {
             disabled={isLoading || !input.trim()}
             aria-label="Send"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
+            {isLoading ? (
+              <span className={styles.sendSpinner} />
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            )}
           </button>
         </form>
-        <p className={styles.footerNote}>
-          Mastra · RAG Agent · Answers sourced from HR knowledge base
-        </p>
+        <p className={styles.footerNote}>Mastra · {title} · AI SDK UI</p>
       </footer>
     </div>
   )

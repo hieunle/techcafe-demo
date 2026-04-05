@@ -1,9 +1,10 @@
 .shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  height: 100%;
   max-width: 780px;
   margin: 0 auto;
+  width: 100%;
   background: var(--bg);
 }
 
@@ -123,7 +124,6 @@
   padding: 0.7rem 1rem;
   border-radius: var(--radius);
   font-size: 0.9rem;
-  line-height: 1.65;
   word-break: break-word;
 }
 
@@ -131,6 +131,8 @@
   background: var(--user-bubble);
   color: #fff;
   border-bottom-right-radius: 4px;
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 .assistantBubble {
@@ -138,6 +140,7 @@
   color: var(--text);
   border-bottom-left-radius: 4px;
   border: 1px solid var(--border);
+  /* line-height/white-space handled by MarkdownMessage */
 }
 
 .messageText {
@@ -265,36 +268,50 @@
   max-width: 72%;
 }
 
-/* ── Tool call card ── */
+/* ── Tool detail card ── */
 .toolCard {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 0.55rem 0.85rem;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
   font-size: 0.8rem;
-  opacity: 0.9;
+  overflow: hidden;
   transition: border-color 0.2s;
 }
 
 .toolCardDone {
-  border-color: #3a4a3a;
-  background: #141a14;
+  border-color: #2a3a2a;
+}
+
+.toolCardError {
+  border-color: #4a2a2a;
 }
 
 .toolHeader {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  cursor: default;
+  width: 100%;
+  text-align: left;
+}
+
+.toolCardDone .toolHeader,
+.toolCardError .toolHeader {
+  cursor: pointer;
+}
+
+.toolCardDone .toolHeader:hover {
+  background: rgba(255,255,255,0.02);
 }
 
 .toolIcon {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  background: #2a3a2a;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: #1e2a1e;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -302,26 +319,71 @@
   color: #6fcf6f;
 }
 
-.toolCardDone .toolIcon {
-  background: #2a3a2a;
-  color: #6fcf6f;
+.toolCardError .toolIcon {
+  background: #2a1e1e;
+  color: #f28b82;
+}
+
+.toolHeaderText {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .toolName {
-  color: var(--text-muted);
   font-size: 0.78rem;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
 .toolCardDone .toolName {
   color: #a8c8a8;
 }
 
+.toolQuery {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+.toolResultBadge {
+  font-size: 0.65rem;
+  background: #2a3a2a;
+  color: #6fcf6f;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.toolErrLabel {
+  font-size: 0.65rem;
+  background: #3a2020;
+  color: #f28b82;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.toolExpandIcon {
+  font-size: 0.55rem;
+  color: var(--text-muted);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
 .toolSpinner {
   display: block;
   width: 10px;
   height: 10px;
-  border: 1.5px solid #3a5a3a;
+  border: 1.5px solid #2a3a2a;
   border-top-color: #6fcf6f;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -331,24 +393,132 @@
   to { transform: rotate(360deg); }
 }
 
-.toolMeta {
+/* ── Tool expanded body ── */
+.toolBody {
+  border-top: 1px solid var(--border);
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 0;
+}
+
+.toolSection {
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  padding-left: 25px;
+  border-bottom: 1px solid var(--border);
 }
 
-.toolMetaLabel {
-  font-size: 0.7rem;
-  color: var(--text-muted);
+.toolSection:last-child {
+  border-bottom: none;
+}
+
+.toolSectionLabel {
+  font-size: 0.63rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  flex-shrink: 0;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  opacity: 0.6;
 }
 
-.toolMetaValue {
-  font-size: 0.78rem;
+.toolCode {
+  font-family: 'SF Mono', 'Fira Mono', 'Consolas', monospace;
+  font-size: 0.72rem;
   color: var(--text);
-  opacity: 0.75;
-  word-break: break-word;
+  opacity: 0.8;
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.5;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.toolErrorText {
+  font-size: 0.78rem;
+  color: #f28b82;
+}
+
+/* ── Knowledge output ── */
+.toolOutputDocs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolOutputSummary {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6fcf6f;
+}
+
+.docChunk {
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.docSource {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--accent-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docSnippet {
+  font-size: 0.7rem;
+  color: var(--text);
+  opacity: 0.65;
+  line-height: 1.45;
+}
+
+/* ── Web search output ── */
+.toolOutputSearch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.searchAnswer {
+  font-size: 0.75rem;
+  color: var(--text);
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+.searchSource {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  color: var(--accent-light);
+  text-decoration: none;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchSource:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* ── Send button spinner ── */
+.sendSpinner {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
 }
