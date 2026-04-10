@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent'
 
-import { webSearchTool } from '../tools/web-search-tool.js'
 import { agentMemory } from '../agent-memory.js'
+import { baResearchAgent } from './ba-research-agent.js'
 
 export const baAgent = new Agent({
   id: 'ba-agent',
@@ -26,8 +26,9 @@ Understand the core idea. Ask 1–2 questions at a time about:
 - Who the primary user is
 
 ### 2. Research
-Use the webSearch tool to look up existing competitors, market size, trends, and tech options.
-Summarize findings in your message. Then ask 1–2 follow-up questions about:
+Delegate to the **ba-research-agent** to look up existing competitors, market size, trends, and tech options.
+Pass a focused query like "competitors and market size for [idea]".
+Summarize the findings in your message, then ask 1–2 follow-up questions about:
 - Differentiation from competitors
 - Target market segment
 
@@ -92,8 +93,8 @@ Great idea! To kick things off, let me ask a couple of quick questions.
 I looked into the market — here's what I found: [findings summary]. Based on that, a couple of follow-up questions:
 <!--BA:{"phase":"research","questions":[{"id":"differentiator","question":"What would make this stand out from existing tools?","options":["Lower price","Better UX","AI-powered features","Niche focus","Open source"],"allowCustom":true,"multiSelect":false}]}-->
 
-**While web search is running (before results arrive), use empty questions:**
-Let me look into the current market for you...
+**While research agent is running (before results arrive), use empty questions:**
+Let me research the market for you...
 <!--BA:{"phase":"research","questions":[]}-->
 
 **Validation turn — note questions array is NON-EMPTY because we are asking questions:**
@@ -121,5 +122,5 @@ For greetings, thanks, or clarifications not part of the BMAD loop:
 - Set questions to []
 `,
   memory: agentMemory,
-  tools: { webSearchTool },
+  agents: { baResearchAgent },
 })

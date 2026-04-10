@@ -1,8 +1,12 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect, ChangeEvent } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo, ChangeEvent } from 'react'
+import { useChat } from '@ai-sdk/react'
+import { DefaultChatTransport } from 'ai'
+import type { UIMessage } from 'ai'
 import styles from './ba-chat.module.css'
 import { MarkdownMessage } from '../components/markdown-message'
+import HistorySidebar from './history-sidebar'
 
 /* ── Types ── */
 type BAPhase = 'discovery' | 'research' | 'refinement' | 'validation' | 'complete'
@@ -22,41 +26,6 @@ interface BASentinel {
   brief?: string
 }
 
-interface ContentPart {
-  type: 'text' | 'image'
-  text?: string
-  image?: string
-  mimeType?: string
-}
-
-interface ToolCallPart {
-  toolCallId: string
-  toolName: string
-  args: Record<string, unknown>
-  status: 'calling' | 'done'
-  result?: {
-    answer?: string
-    sources?: { url: string; title: string }[]
-    searchCount?: number
-  }
-}
-
-interface Message {
-  id: string
-  role: 'user' | 'assistant'
-  /** Sent to the API. For user msgs: string or ContentPart[]. For assistant: clean display text. */
-  content: string | ContentPart[]
-  /** What's shown in the chat bubble */
-  displayText: string
-  imagePreview?: string
-  toolCalls?: ToolCallPart[]
-  phase?: BAPhase
-  questions?: BAQuestion[]
-  brief?: string
-}
-
-type Status = 'idle' | 'streaming' | 'error'
-
 const PHASE_LABELS: Record<BAPhase, string> = {
   discovery: 'Discovery',
   research: 'Research',
@@ -71,7 +40,6 @@ const SENTINEL_RE = /<!--BA:([\s\S]*?)-->/
 
 /* ── Sentinel helpers ── */
 function stripLiveSentinel(text: string): string {
-  // Once we see the opening tag, hide everything from there onward while streaming
   const start = text.indexOf('<!--BA:')
   return start === -1 ? text : text.slice(0, start)
 }
@@ -106,200 +74,30 @@ function parseSentinel(rawText: string): { displayText: string } & Partial<BASen
   }
 }
 
-/* ── Hook ── */
-function useBAStreamChat() {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [status, setStatus] = useState<Status>('idle')
-  const [error, setError] = useState<string | null>(null)
-  const [currentPhase, setCurrentPhase] = useState<BAPhase>('discovery')
-  const abortRef = useRef<AbortController | null>(null)
-  const rawTextRef = useRef('')
+/* ── Tool part helpers ── */
+interface ToolPartLike {
+  type: string
+  toolCallId: string
+  toolName?: string
+  state: string
+  input: Record<string, unknown>
+  output?: unknown
+}
 
-  const send = useCallback(
-    async (content: string | ContentPart[], displayText: string) => {
-      setError(null)
-      setStatus('streaming')
-      rawTextRef.current = ''
+function isToolCallPart(part: { type: string }): boolean {
+  return part.type.startsWith('tool-') || part.type === 'dynamic-tool'
+}
 
-      const userMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content,
-        displayText,
-        imagePreview: Array.isArray(content)
-          ? (content.find((p) => p.type === 'image') as ContentPart | undefined)?.image
-          : undefined,
-      }
+function getPartToolName(part: ToolPartLike): string {
+  if (part.type === 'dynamic-tool') return part.toolName ?? 'unknown'
+  return part.type.replace(/^tool-/, '')
+}
 
-      const assistantId = crypto.randomUUID()
-      const assistantMsg: Message = {
-        id: assistantId,
-        role: 'assistant',
-        content: '',
-        displayText: '',
-        toolCalls: [],
-      }
-
-      setMessages((prev) => [...prev, userMsg, assistantMsg])
-
-      abortRef.current?.abort()
-      abortRef.current = new AbortController()
-
-      // Build history — use displayText for assistant messages (clean, no sentinel)
-      const history = [...messages, userMsg].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }))
-
-      try {
-        const res = await fetch('/api/ba', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: history }),
-          signal: abortRef.current.signal,
-        })
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: `Server error ${res.status}` }))
-          throw new Error(err.error ?? `Server error ${res.status}`)
-        }
-
-        const reader = res.body!.getReader()
-        const decoder = new TextDecoder()
-        let buf = ''
-        const argsMap: Record<string, string> = {}
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buf += decoder.decode(value, { stream: true })
-          const lines = buf.split('\n')
-          buf = lines.pop() ?? ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data:')) continue
-            const raw = line.slice(5).trim()
-            if (!raw || raw === '[DONE]') continue
-
-            let event: { type: string; payload: Record<string, unknown> }
-            try {
-              event = JSON.parse(raw)
-            } catch {
-              continue
-            }
-
-            const { type, payload } = event
-
-            if (type === 'text-delta') {
-              const { text: chunk } = payload as { text: string }
-              rawTextRef.current += chunk
-              const liveDisplay = stripLiveSentinel(rawTextRef.current)
-
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, displayText: liveDisplay } : m,
-                ),
-              )
-            } else if (type === 'tool-call-input-streaming-start') {
-              const { toolCallId, toolName } = payload as { toolCallId: string; toolName: string }
-              argsMap[toolCallId] = ''
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        toolCalls: [
-                          ...(m.toolCalls ?? []),
-                          { toolCallId, toolName, args: {}, status: 'calling' },
-                        ],
-                      }
-                    : m,
-                ),
-              )
-            } else if (type === 'tool-call-delta') {
-              const { toolCallId, argsTextDelta } = payload as {
-                toolCallId: string
-                argsTextDelta: string
-              }
-              if (toolCallId in argsMap) argsMap[toolCallId] += argsTextDelta
-            } else if (type === 'tool-call') {
-              const { toolCallId, args } = payload as {
-                toolCallId: string
-                args: Record<string, unknown>
-              }
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        toolCalls: (m.toolCalls ?? []).map((tc) =>
-                          tc.toolCallId === toolCallId ? { ...tc, args } : tc,
-                        ),
-                      }
-                    : m,
-                ),
-              )
-            } else if (type === 'tool-result') {
-              const { toolCallId, result } = payload as {
-                toolCallId: string
-                result: ToolCallPart['result']
-              }
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        toolCalls: (m.toolCalls ?? []).map((tc) =>
-                          tc.toolCallId === toolCallId
-                            ? { ...tc, status: 'done', result: result ?? undefined }
-                            : tc,
-                        ),
-                      }
-                    : m,
-                ),
-              )
-            }
-          }
-        }
-
-        // Stream complete — parse sentinel from full raw text
-        const { displayText: finalDisplay, phase, questions, brief } = parseSentinel(rawTextRef.current)
-
-        setMessages((prev) =>
-          prev.map((m) => {
-            if (m.id !== assistantId) return m
-            return {
-              ...m,
-              content: finalDisplay,
-              displayText: finalDisplay,
-              phase,
-              questions: questions ?? [],
-              brief,
-            }
-          }),
-        )
-
-        if (phase) setCurrentPhase(phase)
-        setStatus('idle')
-      } catch (err: unknown) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          setStatus('idle')
-          return
-        }
-        const msg = err instanceof Error ? err.message : 'Unknown error'
-        setError(msg)
-        setStatus('error')
-        setMessages((prev) => prev.filter((m) => m.id !== assistantId))
-      }
-    },
-    [messages],
-  )
-
-  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
-  const activeQuestions = lastAssistant?.questions ?? []
-
-  return { messages, status, error, currentPhase, activeQuestions, send }
+/* ── Processed message type ── */
+interface ProcessedMessage {
+  msg: UIMessage
+  displayText: string
+  brief?: string
 }
 
 /* ── Phase bar ── */
@@ -320,12 +118,76 @@ function PhaseBar({ current }: { current: BAPhase }) {
   )
 }
 
-/* ── Web search tool card ── */
-function WebSearchCard({ tc }: { tc: ToolCallPart }) {
+/* ── Tool call config by tool name ── */
+const TOOL_CALL_CONFIG: Record<string, { labelDoing: string; labelDone: string; icon: React.ReactNode }> = {
+  webSearch: {
+    labelDoing: 'Searching the web\u2026',
+    labelDone: 'Web search complete',
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+    ),
+  },
+  webSearchTool: {
+    labelDoing: 'Searching the web\u2026',
+    labelDone: 'Web search complete',
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+    ),
+  },
+  'ba-research-agent': {
+    labelDoing: 'Research agent working\u2026',
+    labelDone: 'Research complete',
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+      </svg>
+    ),
+  },
+  baResearchAgent: {
+    labelDoing: 'Research agent working\u2026',
+    labelDone: 'Research complete',
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+      </svg>
+    ),
+  },
+}
+
+function getToolConfig(toolName: string) {
+  return TOOL_CALL_CONFIG[toolName] ?? {
+    labelDoing: `Running ${toolName}\u2026`,
+    labelDone: `${toolName} complete`,
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <polyline points="16 3 21 3 21 8" /><line x1="4" y1="20" x2="21" y2="3" />
+        <polyline points="21 16 21 21 16 21" /><line x1="15" y1="15" x2="21" y2="21" />
+      </svg>
+    ),
+  }
+}
+
+/* ── Tool call card (works with AI SDK tool parts) ── */
+function ToolCallCard({ part }: { part: ToolPartLike }) {
   const [expanded, setExpanded] = useState(false)
-  const query = (tc.args?.query as string) ?? ''
-  const done  = tc.status === 'done'
-  const result = tc.result
+  const toolName = getPartToolName(part)
+  const done = part.state === 'output-available'
+  const config = getToolConfig(toolName)
+
+  const resultObj: { answer?: string; sources?: { url: string; title: string }[]; searchCount?: number; text?: string } | null =
+    part.output == null
+      ? null
+      : typeof part.output === 'string'
+      ? { text: part.output }
+      : (part.output as { answer?: string; sources?: { url: string; title: string }[]; searchCount?: number; text?: string })
+
+  const query = (part.input?.query as string) ?? (part.input?.prompt as string) ?? (part.input?.message as string) ?? ''
+  const answer = resultObj?.answer ?? resultObj?.text ?? ''
+  const sources = resultObj?.sources ?? []
 
   return (
     <div className={`${styles.searchCard} ${done ? styles.searchCardDone : ''}`}>
@@ -345,32 +207,32 @@ function WebSearchCard({ tc }: { tc: ToolCallPart }) {
           )}
         </span>
         <span className={styles.searchLabel}>
-          {done ? 'Web search complete' : 'Searching the web…'}
+          {done ? config.labelDone : config.labelDoing}
         </span>
         {query && <span className={styles.searchQueryInline}>&ldquo;{query}&rdquo;</span>}
-        {done && result?.sources && (
-          <span className={styles.searchBadge}>{result.sources.length} sources</span>
+        {done && sources.length > 0 && (
+          <span className={styles.searchBadge}>{sources.length} sources</span>
         )}
         {done && (
           <span className={styles.searchExpand}>{expanded ? '▲' : '▼'}</span>
         )}
       </button>
 
-      {expanded && done && result && (
+      {expanded && done && resultObj && (
         <div className={styles.searchBody}>
-          {result.answer && (
+          {answer && (
             <div className={styles.searchSection}>
               <span className={styles.searchSectionLabel}>Summary</span>
               <p className={styles.searchAnswerText}>
-                {result.answer.slice(0, 400)}{result.answer.length > 400 ? '…' : ''}
+                {answer.slice(0, 400)}{answer.length > 400 ? '…' : ''}
               </p>
             </div>
           )}
-          {(result.sources ?? []).length > 0 && (
+          {sources.length > 0 && (
             <div className={styles.searchSection}>
               <span className={styles.searchSectionLabel}>Sources</span>
               <div className={styles.searchSources}>
-                {result.sources!.map((s, i) => (
+                {sources.map((s, i) => (
                   <a key={i} href={s.url} target="_blank" rel="noreferrer" className={styles.searchSourceLink}>
                     <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -560,19 +422,187 @@ function BriefCard({ brief }: { brief: string }) {
   )
 }
 
-/* ── Main chat ── */
-export default function BAChat() {
-  const { messages, status, error, currentPhase, activeQuestions, send } = useBAStreamChat()
+/* ── Mastra message → UIMessage converter ── */
+interface MastraMsgPart {
+  type: string
+  // text parts
+  text?: string
+  // image parts — Mastra/AI SDK CoreMessage stores images in several ways
+  image?: string          // base64 bytes string or data URL or https URL
+  url?: string            // pre-formed data URL
+  // file parts
+  data?: string           // base64 data
+  // mime/media type — field name varies across SDK versions
+  mediaType?: string
+  mimeType?: string
+}
+
+interface MastraMsg {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: { parts?: MastraMsgPart[]; content?: string }
+  createdAt: string
+}
+
+function toDataUrl(raw: string, mediaType: string): string {
+  if (raw.startsWith('data:') || raw.startsWith('http')) return raw
+  return `data:${mediaType};base64,${raw}`
+}
+
+function mastraToUIMessages(msgs: MastraMsg[]): UIMessage[] {
+  return msgs
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => {
+      const uiParts: UIMessage['parts'] = []
+
+      if (m.content?.parts?.length) {
+        for (const p of m.content.parts) {
+          if (p.type === 'text') {
+            uiParts.push({ type: 'text', text: p.text ?? '' })
+          } else if (p.type === 'image') {
+            // CoreMessage image part: { type: 'image', image: '<base64 | URL>', mimeType/mediaType }
+            const mediaType = p.mediaType ?? p.mimeType ?? 'image/jpeg'
+            const raw = p.url ?? p.image ?? ''
+            if (raw) {
+              uiParts.push({
+                type: 'file',
+                url: toDataUrl(raw, mediaType),
+                mediaType,
+              } as { type: 'file'; url: string; mediaType: string })
+            }
+          } else if (p.type === 'file') {
+            const mediaType = p.mediaType ?? p.mimeType ?? 'application/octet-stream'
+            const raw = p.url ?? p.data ?? p.image ?? ''
+            if (raw) {
+              uiParts.push({
+                type: 'file',
+                url: toDataUrl(raw, mediaType),
+                mediaType,
+              } as { type: 'file'; url: string; mediaType: string })
+            }
+          }
+        }
+      }
+
+      // Fallback: if nothing extracted, use top-level content string
+      if (uiParts.length === 0) {
+        uiParts.push({ type: 'text', text: m.content?.content ?? '' })
+      }
+
+      return {
+        id: m.id,
+        role: m.role as 'user' | 'assistant',
+        parts: uiParts,
+        createdAt: new Date(m.createdAt),
+      }
+    })
+}
+
+/* ── Inner chat (receives threadId from wrapper) ── */
+function BAChatInner({ threadId, loadExisting, onFirstMessage }: {
+  threadId: string
+  loadExisting: boolean
+  onFirstMessage: () => void
+}) {
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: '/api/agents/ba-agent',
+        body: { memory: { thread: threadId, resource: 'ba-agent' } },
+      }),
+    [threadId],
+  )
+  const { messages, sendMessage, setMessages, status, error } = useChat({
+    id: threadId,
+    transport,
+  })
+
   const [input, setInput] = useState('')
   const [imageData, setImageData] = useState<string | null>(null)
   const [imageName, setImageName] = useState<string | null>(null)
+  const [loadingHistory, setLoadingHistory] = useState(loadExisting)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const isStreaming = status === 'streaming'
+  const isStreaming = status === 'submitted' || status === 'streaming'
+  const hasSentFirst = useRef(false)
+
+  useEffect(() => {
+    if (loadExisting) {
+      // Load history for existing thread
+      let cancelled = false
+      fetch(`/api/threads/${threadId}/messages`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return
+          setMessages(mastraToUIMessages(data.messages ?? []))
+        })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setLoadingHistory(false) })
+      return () => { cancelled = true }
+    } else {
+      // Pre-create the thread so it appears in the sidebar immediately
+      fetch('/api/threads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threadId, resourceId: 'ba-agent' }),
+      }).catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId])
+
+  /* ── Derive phase, questions, and display text from raw messages ── */
+  const { processed, currentPhase, activeQuestions } = useMemo(() => {
+    let phase: BAPhase = 'discovery'
+    let lastQuestions: BAQuestion[] = []
+    const isActive = status === 'streaming' || status === 'submitted'
+
+    const result: ProcessedMessage[] = messages.map((msg, i) => {
+      if (msg.role !== 'assistant') {
+        const userText = msg.parts
+          .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+          .map((p) => p.text)
+          .join('')
+        return { msg, displayText: userText }
+      }
+
+      const rawText = msg.parts
+        .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+        .map((p) => p.text)
+        .join('')
+
+      const isLastMsg = i === messages.length - 1
+      const isCurrentlyStreaming = isLastMsg && isActive
+
+      if (isCurrentlyStreaming) {
+        return { msg, displayText: stripLiveSentinel(rawText) }
+      }
+
+      const { displayText, phase: msgPhase, questions: msgQuestions, brief: msgBrief } = parseSentinel(rawText)
+
+      if (msgPhase) phase = msgPhase
+      lastQuestions = msgQuestions ?? []
+
+      return { msg, displayText, brief: msgBrief }
+    })
+
+    return {
+      processed: result,
+      currentPhase: phase,
+      activeQuestions: isActive ? [] : lastQuestions,
+    }
+  }, [messages, status])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, activeQuestions])
+
+  const notifyFirstMessage = useCallback(() => {
+    if (!hasSentFirst.current) {
+      hasSentFirst.current = true
+      // Refresh sidebar after title generation completes (LLM call takes a few seconds)
+      setTimeout(() => onFirstMessage(), 6000)
+    }
+  }, [onFirstMessage])
 
   const handleAnswers = useCallback(
     (answers: Record<string, string | string[]>) => {
@@ -580,9 +610,10 @@ export default function BAChat() {
         Array.isArray(val) ? val.join(', ') : val,
       )
       const text = lines.join('\n')
-      send(text, text)
+      sendMessage({ text })
+      notifyFirstMessage()
     },
-    [send],
+    [sendMessage, notifyFirstMessage],
   )
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -591,16 +622,16 @@ export default function BAChat() {
     if ((!text && !imageData) || isStreaming) return
 
     if (imageData) {
-      const parts: ContentPart[] = []
-      if (text) parts.push({ type: 'text', text })
-      // Extract mimeType from data URL (e.g. "data:image/png;base64,...")
       const mimeType = imageData.match(/^data:([^;]+);/)?.[1] ?? 'image/jpeg'
-      parts.push({ type: 'image', image: imageData, mimeType })
-      send(parts, text || '📎 Image attached')
+      sendMessage({
+        text: text || '📎 Image attached',
+        files: [{ type: 'file', mediaType: mimeType, url: imageData }],
+      })
     } else {
-      send(text, text)
+      sendMessage({ text })
     }
 
+    notifyFirstMessage()
     setInput('')
     setImageData(null)
     setImageName(null)
@@ -632,7 +663,7 @@ export default function BAChat() {
           </div>
           <div>
             <h1 className={styles.title}>BA Brainstorm</h1>
-            <p className={styles.subtitle}>BMAD · claude-haiku-4-5 via OpenRouter · web search</p>
+            <p className={styles.subtitle}>BMAD · claude-haiku-4-5 via OpenRouter · research agent</p>
           </div>
         </div>
         <PhaseBar current={currentPhase} />
@@ -644,7 +675,7 @@ export default function BAChat() {
         <div className={styles.chatArea}>
           {/* Messages */}
           <main className={styles.messages}>
-        {messages.length === 0 && (
+        {messages.length === 0 && !loadingHistory && (
           <div className={styles.empty}>
             <div className={styles.emptyIcon}>
               <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -656,12 +687,12 @@ export default function BAChat() {
           </div>
         )}
 
-        {messages.map((m) => (
+        {processed.map(({ msg, displayText, brief }) => (
           <div
-            key={m.id}
-            className={`${styles.row} ${m.role === 'user' ? styles.userRow : styles.assistantRow}`}
+            key={msg.id}
+            className={`${styles.row} ${msg.role === 'user' ? styles.userRow : styles.assistantRow}`}
           >
-            {m.role === 'assistant' && (
+            {msg.role === 'assistant' && (
               <div className={styles.msgAvatar}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="2" y="3" width="20" height="14" rx="2" />
@@ -671,27 +702,32 @@ export default function BAChat() {
               </div>
             )}
             <div className={styles.bubbleCol}>
-              {/* Tool call cards (web search) */}
-              {m.role === 'assistant' && (m.toolCalls ?? []).map((tc) => (
-                <WebSearchCard key={tc.toolCallId} tc={tc} />
+              {/* Tool call cards (assistant only) */}
+              {msg.role === 'assistant' && msg.parts.filter(isToolCallPart).map((part, i) => (
+                <ToolCallCard key={(part as ToolPartLike).toolCallId ?? i} part={part as ToolPartLike} />
               ))}
 
-              {/* Image preview (user) */}
-              {m.imagePreview && (
-                <img src={m.imagePreview} alt="Attached" className={styles.imagePreview} />
-              )}
+              {/* Image preview (user messages with file parts) */}
+              {msg.role === 'user' && msg.parts
+                .filter((p): p is { type: 'file'; mediaType: string; url: string } =>
+                  p.type === 'file' && (p as { mediaType?: string }).mediaType?.startsWith('image/') === true
+                )
+                .map((fp, i) => (
+                  <img key={i} src={fp.url} alt="Attached" className={styles.imagePreview} />
+                ))
+              }
 
               {/* Text bubble */}
-              {(m.displayText || m.role === 'assistant') && (
-                <div className={`${styles.bubble} ${m.role === 'user' ? styles.userBubble : styles.assistantBubble}`}>
-                  {m.displayText ? (
-                    m.role === 'assistant' ? (
-                      <MarkdownMessage content={m.displayText} accentColor="var(--ba-accent)" />
+              {(displayText || msg.role === 'assistant') && (
+                <div className={`${styles.bubble} ${msg.role === 'user' ? styles.userBubble : styles.assistantBubble}`}>
+                  {displayText ? (
+                    msg.role === 'assistant' ? (
+                      <MarkdownMessage content={displayText} accentColor="var(--ba-accent)" />
                     ) : (
-                      m.displayText
+                      displayText
                     )
                   ) : (
-                    m.role === 'assistant' && (m.toolCalls ?? []).length === 0
+                    msg.role === 'assistant' && msg.parts.filter(isToolCallPart).length === 0
                       ? <span className={styles.typing}><span /><span /><span /></span>
                       : null
                   )}
@@ -699,7 +735,7 @@ export default function BAChat() {
               )}
 
               {/* Product brief */}
-              {m.brief && <BriefCard brief={m.brief} />}
+              {brief && <BriefCard brief={brief} />}
             </div>
           </div>
         ))}
@@ -711,7 +747,7 @@ export default function BAChat() {
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
-            {error}
+            {error.message}
           </div>
         )}
 
@@ -798,6 +834,46 @@ export default function BAChat() {
         </aside>
 
       </div>{/* end body */}
+    </div>
+  )
+}
+
+/* ── Outer wrapper: manages thread state + renders sidebar + inner chat ── */
+export default function BAChat() {
+  const [threadId, setThreadId] = useState(() => crypto.randomUUID())
+  const [isExisting, setIsExisting] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const handleNewChat = useCallback(() => {
+    setThreadId(crypto.randomUUID())
+    setIsExisting(false)
+  }, [])
+
+  const handleSelectThread = useCallback((id: string) => {
+    setThreadId(id)
+    setIsExisting(true)
+  }, [])
+
+  const handleFirstMessage = useCallback(() => {
+    setRefreshKey((k) => k + 1)
+  }, [])
+
+  return (
+    <div className={styles.outerShell}>
+      <HistorySidebar
+        activeThreadId={threadId}
+        onSelectThread={handleSelectThread}
+        onNewChat={handleNewChat}
+        refreshKey={refreshKey}
+      />
+      <div className={styles.chatMain}>
+        <BAChatInner
+          key={threadId}
+          threadId={threadId}
+          loadExisting={isExisting}
+          onFirstMessage={handleFirstMessage}
+        />
+      </div>
     </div>
   )
 }
