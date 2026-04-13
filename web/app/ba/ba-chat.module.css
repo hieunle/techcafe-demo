@@ -641,6 +641,24 @@
 .sendBtn:active:not(:disabled) { transform: scale(0.95); }
 .sendBtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.stopBtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  border: none;
+  background: #e53e3e;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.stopBtn:hover { background: #c53030; }
+.stopBtn:active { transform: scale(0.95); }
+
 .footerNote {
   margin-top: 0.45rem;
   font-size: 0.68rem;
@@ -672,16 +690,12 @@
   padding: 0.5rem 0.75rem;
   background: none;
   border: none;
-  cursor: default;
+  cursor: pointer;
   width: 100%;
   text-align: left;
 }
 
-.searchCardDone .searchHeader {
-  cursor: pointer;
-}
-
-.searchCardDone .searchHeader:hover {
+.searchHeader:hover {
   background: rgba(255,255,255,0.02);
 }
 
@@ -807,5 +821,121 @@
 .searchSourceLink:hover {
   opacity: 1;
   text-decoration: underline;
+}
+
+/* ── Preparing questions indicator ── */
+.preparingQuestions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.5rem 0.75rem;
+  background: var(--ba-surface2);
+  border: 1px solid var(--ba-border);
+  border-radius: 9px;
+  font-size: 0.78rem;
+  color: var(--ba-accent-light);
+  margin-bottom: 4px;
+}
+
+/* ── Tool JSON block ── */
+.toolJson {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--ba-border);
+  border-radius: 6px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.7rem;
+  line-height: 1.55;
+  color: var(--ba-text);
+  opacity: 0.85;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* ── Answered questions card (Cursor-style inline answer) ── */
+.answeredCard {
+  background: var(--ba-surface2);
+  border: 1px solid var(--ba-border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 2px;
+}
+
+.answeredHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0.5rem 0.75rem;
+  background: rgba(124, 108, 255, 0.06);
+  border-bottom: 1px solid var(--ba-border);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ba-accent-light);
+}
+
+.answeredHeaderIcon {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: rgba(124, 108, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--ba-accent-light);
+}
+
+.answeredQuestion {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid rgba(46, 50, 69, 0.5);
+}
+
+.answeredQuestion:last-child {
+  border-bottom: none;
+}
+
+.answeredQuestionText {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ba-text-muted);
+  margin: 0 0 6px;
+  line-height: 1.35;
+}
+
+.answeredLabel {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ba-accent-light);
+  margin-bottom: 5px;
+  opacity: 0.7;
+}
+
+.answeredChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.answeredChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.22rem 0.6rem;
+  border-radius: 16px;
+  font-size: 0.73rem;
+  border: 1px solid rgba(124, 108, 255, 0.4);
+  background: rgba(124, 108, 255, 0.12);
+  color: var(--ba-accent-light);
+}
+
+.answeredChipCheck {
+  display: flex;
+  align-items: center;
+  color: var(--ba-accent-light);
 }
 

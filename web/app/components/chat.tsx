@@ -190,7 +190,7 @@ export default function Chat({
   emptyHint = 'Ask anything to get started.',
   icon,
 }: ChatProps) {
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, stop, status } = useChat({
     transport: new DefaultChatTransport({ api: `/api/agents/${agentId}` }),
   })
 
@@ -325,21 +325,30 @@ export default function Chat({
             disabled={isLoading}
             autoFocus
           />
-          <button
-            type="submit"
-            className={styles.sendBtn}
-            disabled={isLoading || !input.trim()}
-            aria-label="Send"
-          >
-            {isLoading ? (
-              <span className={styles.sendSpinner} />
-            ) : (
+          {isLoading ? (
+            <button
+              type="button"
+              className={styles.stopBtn}
+              onClick={stop}
+              aria-label="Stop"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className={styles.sendBtn}
+              disabled={!input.trim()}
+              aria-label="Send"
+            >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="22" y1="2" x2="11" y2="13" />
                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
               </svg>
-            )}
-          </button>
+            </button>
+          )}
         </form>
         <p className={styles.footerNote}>Mastra · {title} · AI SDK UI</p>
       </footer>

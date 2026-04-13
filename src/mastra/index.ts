@@ -3,7 +3,6 @@ import { chatRoute } from '@mastra/ai-sdk'
 
 import { badInstructionAgent } from './agents/bad-instruction-agent.js'
 import { baAgent } from './agents/ba-agent.js'
-import { baResearchAgent } from './agents/ba-research-agent.js'
 import { goodInstructionAgent } from './agents/good-instruction-agent.js'
 import { ragAgent } from './agents/rag-agent.js'
 // import { hrMCPServer } from './mcp-server.js'
@@ -17,7 +16,6 @@ export const mastra = new Mastra({
     goodInstructionAgent,
     ragAgent,
     baAgent,
-    baResearchAgent,
   },
   vectors: { libsqlVector },
   // mcpServers: {

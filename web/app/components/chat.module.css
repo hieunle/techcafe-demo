@@ -522,3 +522,26 @@
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
+
+.stopBtn {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: none;
+  background: #e53e3e;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.stopBtn:hover {
+  background: #c53030;
+}
+
+.stopBtn:active {
+  transform: scale(0.95);
+}

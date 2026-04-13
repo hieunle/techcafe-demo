@@ -20,7 +20,7 @@ interface BAQuestion {
   multiSelect: boolean
 }
 
-interface BASentinel {
+interface BADataPart {
   phase: BAPhase
   questions: BAQuestion[]
   brief?: string
@@ -36,86 +36,54 @@ const PHASE_LABELS: Record<BAPhase, string> = {
 
 const PHASE_ORDER: BAPhase[] = ['discovery', 'research', 'refinement', 'validation', 'complete']
 
-const SENTINEL_RE = /<!--BA:([\s\S]*?)-->/
-
-/* ── Sentinel helpers ── */
-function stripLiveSentinel(text: string): string {
-  const start = text.indexOf('<!--BA:')
-  return start === -1 ? text : text.slice(0, start)
-}
-
-function parseSentinel(rawText: string): { displayText: string } & Partial<BASentinel> {
-  const match = rawText.match(SENTINEL_RE)
-  if (!match) return { displayText: rawText.trimEnd() }
-
-  let sentinel: Partial<BASentinel> = {}
-  try {
-    sentinel = JSON.parse(match[1]) as BASentinel
-  } catch {
-    /* malformed — keep defaults */
-  }
-
-  const displayText = rawText.replace(SENTINEL_RE, '').trimEnd()
-  const rawQs = sentinel.questions
-  const questions: BAQuestion[] = Array.isArray(rawQs)
-    ? rawQs.map((q: Partial<BAQuestion>) => ({
-        id: String(q.id ?? ''),
-        question: String(q.question ?? ''),
-        options: Array.isArray(q.options) ? q.options.map(String) : [],
-        allowCustom: q.allowCustom !== false,
-        multiSelect: q.multiSelect === true,
-      }))
-    : []
-  return {
-    displayText,
-    phase: sentinel.phase,
-    questions,
-    brief: sentinel.brief,
-  }
-}
-
 /* ── Tool part helpers ── */
-interface ToolPartLike {
-  type: string
+
+/**
+ * Normalized tool invocation – works with both message formats:
+ *   v5 (from mastraToUIMessages on reload): { type:'tool-invocation', toolInvocation:{...} }
+ *   v6 (from useChat live stream):          { type:'dynamic-tool', toolName, state, input, output }
+ *                                           { type:'tool-{name}', state, input, output }
+ */
+interface NormalizedToolInvocation {
   toolCallId: string
-  toolName?: string
-  state: string
-  input: Record<string, unknown>
-  output?: unknown
+  toolName: string
+  args: Record<string, unknown>
+  isDone: boolean
+  result?: unknown
 }
 
-function isToolCallPart(part: { type: string }): boolean {
-  return part.type.startsWith('tool-') || part.type === 'dynamic-tool'
-}
+function getToolInvocationFromPart(part: Record<string, unknown>): NormalizedToolInvocation | null {
+  const type = part.type as string
 
-function getPartToolName(part: ToolPartLike): string {
-  if (part.type === 'dynamic-tool') return part.toolName ?? 'unknown'
-  return part.type.replace(/^tool-/, '')
-}
+  // v5 format – stored messages loaded on reload via mastraToUIMessages
+  if (type === 'tool-invocation' && part.toolInvocation) {
+    const inv = part.toolInvocation as { toolCallId: string; toolName: string; args: Record<string, unknown>; state: string; result?: unknown }
+    return { toolCallId: inv.toolCallId, toolName: inv.toolName, args: inv.args ?? {}, isDone: inv.state === 'result', result: inv.result }
+  }
 
-/* ── Processed message type ── */
-interface ProcessedMessage {
-  msg: UIMessage
-  displayText: string
-  brief?: string
-}
+  // v6 dynamic-tool format – live stream from useChat v6
+  if (type === 'dynamic-tool') {
+    return {
+      toolCallId: (part.toolCallId as string) ?? '',
+      toolName: (part.toolName as string) ?? '',
+      args: (part.input as Record<string, unknown>) ?? {},
+      isDone: part.state === 'output-available',
+      result: part.output,
+    }
+  }
 
-/* ── Phase bar ── */
-function PhaseBar({ current }: { current: BAPhase }) {
-  const idx = PHASE_ORDER.indexOf(current)
-  return (
-    <div className={styles.phaseBar}>
-      {PHASE_ORDER.map((phase, i) => (
-        <div
-          key={phase}
-          className={`${styles.phaseStep} ${i <= idx ? styles.phaseStepActive : ''} ${i === idx ? styles.phaseStepCurrent : ''}`}
-        >
-          <span className={styles.phaseStepDot} />
-          <span className={styles.phaseStepLabel}>{PHASE_LABELS[phase]}</span>
-        </div>
-      ))}
-    </div>
-  )
+  // v6 static tool format – type is 'tool-{name}', e.g. 'tool-webSearch'
+  if (type.startsWith('tool-') && type !== 'tool-invocation') {
+    return {
+      toolCallId: (part.toolCallId as string) ?? '',
+      toolName: type.slice('tool-'.length),
+      args: (part.input as Record<string, unknown>) ?? {},
+      isDone: part.state === 'output-available',
+      result: part.output,
+    }
+  }
+
+  return null
 }
 
 /* ── Tool call config by tool name ── */
@@ -138,21 +106,14 @@ const TOOL_CALL_CONFIG: Record<string, { labelDoing: string; labelDone: string; 
       </svg>
     ),
   },
-  'ba-research-agent': {
-    labelDoing: 'Research agent working\u2026',
-    labelDone: 'Research complete',
+  askQuestions: {
+    labelDoing: 'Preparing questions\u2026',
+    labelDone: 'Questions ready',
     icon: (
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-      </svg>
-    ),
-  },
-  baResearchAgent: {
-    labelDoing: 'Research agent working\u2026',
-    labelDone: 'Research complete',
-    icon: (
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+        <circle cx="12" cy="12" r="10" />
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+        <path d="M12 17h.01" />
       </svg>
     ),
   },
@@ -171,34 +132,46 @@ function getToolConfig(toolName: string) {
   }
 }
 
-/* ── Tool call card (works with AI SDK tool parts) ── */
-function ToolCallCard({ part }: { part: ToolPartLike }) {
+/* ── Phase bar ── */
+function PhaseBar({ current }: { current: BAPhase }) {
+  const idx = PHASE_ORDER.indexOf(current)
+  return (
+    <div className={styles.phaseBar}>
+      {PHASE_ORDER.map((phase, i) => (
+        <div
+          key={phase}
+          className={`${styles.phaseStep} ${i <= idx ? styles.phaseStepActive : ''} ${i === idx ? styles.phaseStepCurrent : ''}`}
+        >
+          <span className={styles.phaseStepDot} />
+          <span className={styles.phaseStepLabel}>{PHASE_LABELS[phase]}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ── Tool call card (works with both AI SDK v5 reload and v6 live-stream parts) ── */
+function ToolCallCard({ inv }: { inv: NormalizedToolInvocation }) {
   const [expanded, setExpanded] = useState(false)
-  const toolName = getPartToolName(part)
-  const done = part.state === 'output-available'
-  const config = getToolConfig(toolName)
+  const { isDone } = inv
+  const config = getToolConfig(inv.toolName)
 
-  const resultObj: { answer?: string; sources?: { url: string; title: string }[]; searchCount?: number; text?: string } | null =
-    part.output == null
-      ? null
-      : typeof part.output === 'string'
-      ? { text: part.output }
-      : (part.output as { answer?: string; sources?: { url: string; title: string }[]; searchCount?: number; text?: string })
+  const args = inv.args ?? {}
+  const query = (args.query as string) ?? (args.prompt as string) ?? (args.message as string) ?? ''
 
-  const query = (part.input?.query as string) ?? (part.input?.prompt as string) ?? (part.input?.message as string) ?? ''
-  const answer = resultObj?.answer ?? resultObj?.text ?? ''
-  const sources = resultObj?.sources ?? []
+  const hasArgs = Object.keys(args).length > 0
+  const hasResult = inv.result != null
 
   return (
-    <div className={`${styles.searchCard} ${done ? styles.searchCardDone : ''}`}>
+    <div className={`${styles.searchCard} ${isDone ? styles.searchCardDone : ''}`}>
       <button
         type="button"
         className={styles.searchHeader}
-        onClick={() => done && setExpanded((v) => !v)}
+        onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
         <span className={styles.searchIcon}>
-          {done ? (
+          {isDone ? (
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="20 6 9 17 4 12" />
             </svg>
@@ -207,41 +180,35 @@ function ToolCallCard({ part }: { part: ToolPartLike }) {
           )}
         </span>
         <span className={styles.searchLabel}>
-          {done ? config.labelDone : config.labelDoing}
+          {isDone ? config.labelDone : config.labelDoing}
         </span>
         {query && <span className={styles.searchQueryInline}>&ldquo;{query}&rdquo;</span>}
-        {done && sources.length > 0 && (
-          <span className={styles.searchBadge}>{sources.length} sources</span>
-        )}
-        {done && (
-          <span className={styles.searchExpand}>{expanded ? '▲' : '▼'}</span>
-        )}
+        <span className={styles.searchExpand}>{expanded ? '▲' : '▼'}</span>
       </button>
 
-      {expanded && done && resultObj && (
+      {expanded && (
         <div className={styles.searchBody}>
-          {answer && (
+          {hasArgs && (
             <div className={styles.searchSection}>
-              <span className={styles.searchSectionLabel}>Summary</span>
-              <p className={styles.searchAnswerText}>
-                {answer.slice(0, 400)}{answer.length > 400 ? '…' : ''}
-              </p>
+              <span className={styles.searchSectionLabel}>Arguments</span>
+              <pre className={styles.toolJson}>{JSON.stringify(args, null, 2)}</pre>
             </div>
           )}
-          {sources.length > 0 && (
+          {hasResult && (
             <div className={styles.searchSection}>
-              <span className={styles.searchSectionLabel}>Sources</span>
-              <div className={styles.searchSources}>
-                {sources.map((s, i) => (
-                  <a key={i} href={s.url} target="_blank" rel="noreferrer" className={styles.searchSourceLink}>
-                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                      <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
-                    </svg>
-                    {s.title || s.url}
-                  </a>
-                ))}
-              </div>
+              <span className={styles.searchSectionLabel}>Result</span>
+              <pre className={styles.toolJson}>
+                {typeof inv.result === 'string'
+                  ? inv.result
+                  : JSON.stringify(inv.result, null, 2)}
+              </pre>
+            </div>
+          )}
+          {!hasArgs && !hasResult && (
+            <div className={styles.searchSection}>
+              <span className={styles.searchSectionLabel}>
+                {isDone ? 'No data' : 'Waiting for result…'}
+              </span>
             </div>
           )}
         </div>
@@ -406,6 +373,52 @@ function QuestionsPanel({
   )
 }
 
+/* ── Answered questions card (read-only, Cursor-style) ── */
+function AnsweredQuestionsCard({
+  questions,
+  answers,
+}: {
+  questions: BAQuestion[]
+  answers: Record<string, string | string[]>
+}) {
+  if (questions.length === 0) return null
+
+  return (
+    <div className={styles.answeredCard}>
+      <div className={styles.answeredHeader}>
+        <span className={styles.answeredHeaderIcon}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </span>
+        Questions answered
+      </div>
+      {questions.map((q) => {
+        const val = answers[q.id]
+        const selected = Array.isArray(val) ? val : val ? [val] : []
+        return (
+          <div key={q.id} className={styles.answeredQuestion}>
+            <p className={styles.answeredQuestionText}>{q.question}</p>
+            <div className={styles.answeredLabel}>Answer</div>
+            <div className={styles.answeredChips}>
+              {selected.map((s) => (
+                <span key={s} className={styles.answeredChip}>
+                  <span className={styles.answeredChipCheck}>
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </span>
+                  {s}
+                </span>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 /* ── Brief card ── */
 function BriefCard({ brief }: { brief: string }) {
   return (
@@ -423,19 +436,8 @@ function BriefCard({ brief }: { brief: string }) {
 }
 
 /* ── Mastra message → UIMessage converter ── */
-interface MastraMsgPart {
-  type: string
-  // text parts
-  text?: string
-  // image parts — Mastra/AI SDK CoreMessage stores images in several ways
-  image?: string          // base64 bytes string or data URL or https URL
-  url?: string            // pre-formed data URL
-  // file parts
-  data?: string           // base64 data
-  // mime/media type — field name varies across SDK versions
-  mediaType?: string
-  mimeType?: string
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MastraMsgPart = Record<string, any>
 
 interface MastraMsg {
   id: string
@@ -459,8 +461,17 @@ function mastraToUIMessages(msgs: MastraMsg[]): UIMessage[] {
         for (const p of m.content.parts) {
           if (p.type === 'text') {
             uiParts.push({ type: 'text', text: p.text ?? '' })
+          } else if (p.type === 'tool-invocation' && p.toolInvocation) {
+            uiParts.push({
+              type: 'tool-invocation',
+              toolInvocation: p.toolInvocation,
+            } as unknown as UIMessage['parts'][number])
+          } else if (p.type === 'data-ba-questions' && p.data) {
+            uiParts.push({
+              type: 'data-ba-questions',
+              data: p.data,
+            } as unknown as UIMessage['parts'][number])
           } else if (p.type === 'image') {
-            // CoreMessage image part: { type: 'image', image: '<base64 | URL>', mimeType/mediaType }
             const mediaType = p.mediaType ?? p.mimeType ?? 'image/jpeg'
             const raw = p.url ?? p.image ?? ''
             if (raw) {
@@ -484,7 +495,6 @@ function mastraToUIMessages(msgs: MastraMsg[]): UIMessage[] {
         }
       }
 
-      // Fallback: if nothing extracted, use top-level content string
       if (uiParts.length === 0) {
         uiParts.push({ type: 'text', text: m.content?.content ?? '' })
       }
@@ -496,6 +506,17 @@ function mastraToUIMessages(msgs: MastraMsg[]): UIMessage[] {
         createdAt: new Date(m.createdAt),
       }
     })
+}
+
+/* ── Extract BA data from a message's parts ── */
+function extractBADataFromParts(parts: UIMessage['parts']): Partial<BADataPart> | null {
+  for (const part of parts) {
+    if (part.type === 'data-ba-questions') {
+      const data = (part as { type: string; data: BADataPart }).data
+      if (data && data.phase) return data
+    }
+  }
+  return null
 }
 
 /* ── Inner chat (receives threadId from wrapper) ── */
@@ -512,7 +533,7 @@ function BAChatInner({ threadId, loadExisting, onFirstMessage }: {
       }),
     [threadId],
   )
-  const { messages, sendMessage, setMessages, status, error } = useChat({
+  const { messages, sendMessage, setMessages, stop, status, error } = useChat({
     id: threadId,
     transport,
   })
@@ -521,6 +542,11 @@ function BAChatInner({ threadId, loadExisting, onFirstMessage }: {
   const [imageData, setImageData] = useState<string | null>(null)
   const [imageName, setImageName] = useState<string | null>(null)
   const [loadingHistory, setLoadingHistory] = useState(loadExisting)
+  const [answeredMap, setAnsweredMap] = useState<
+    Record<string, { questions: BAQuestion[]; answers: Record<string, string | string[]> }>
+  >({})
+  const [answerMsgIds, setAnswerMsgIds] = useState<Set<string>>(new Set())
+  const pendingAnswer = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const isStreaming = status === 'submitted' || status === 'streaming'
@@ -550,51 +576,63 @@ function BAChatInner({ threadId, loadExisting, onFirstMessage }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId])
 
-  /* ── Derive phase, questions, and display text from raw messages ── */
-  const { processed, currentPhase, activeQuestions } = useMemo(() => {
+  /* ── Derive phase, active questions, and reconstruct answered state from history ── */
+  const { currentPhase, lastQuestionsMessageId, hasActiveQuestions, restoredAnswered, restoredAnswerMsgIds } = useMemo(() => {
     let phase: BAPhase = 'discovery'
+    let lastMsgId: string | undefined
     let lastQuestions: BAQuestion[] = []
     const isActive = status === 'streaming' || status === 'submitted'
+    const restored: Record<string, { questions: BAQuestion[]; answers: Record<string, string | string[]> }> = {}
+    const answerUserMsgIds = new Set<string>()
 
-    const result: ProcessedMessage[] = messages.map((msg, i) => {
-      if (msg.role !== 'assistant') {
-        const userText = msg.parts
-          .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-          .map((p) => p.text)
-          .join('')
-        return { msg, displayText: userText }
+    for (const msg of messages) {
+      if (msg.role === 'user' && lastMsgId) {
+        const userText = msg.parts.find((p) => p.type === 'text') as { type: 'text'; text: string } | undefined
+        if (userText?.text && lastQuestions.length > 0) {
+          const answers: Record<string, string | string[]> = {}
+          const lines = userText.text.split('\n')
+          for (const line of lines) {
+            const sepIdx = line.indexOf(': ')
+            if (sepIdx === -1) continue
+            const questionText = line.slice(0, sepIdx)
+            const answerText = line.slice(sepIdx + 2)
+            const matched = lastQuestions.find((q) => q.question === questionText)
+            if (matched) {
+              const vals = answerText.split(', ')
+              answers[matched.id] = vals.length > 1 ? vals : answerText
+            }
+          }
+          if (Object.keys(answers).length > 0) {
+            restored[lastMsgId] = { questions: lastQuestions, answers }
+            answerUserMsgIds.add(msg.id)
+          }
+        }
+        lastMsgId = undefined
+        lastQuestions = []
+        continue
       }
-
-      const rawText = msg.parts
-        .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-        .map((p) => p.text)
-        .join('')
-
-      const isLastMsg = i === messages.length - 1
-      const isCurrentlyStreaming = isLastMsg && isActive
-
-      if (isCurrentlyStreaming) {
-        return { msg, displayText: stripLiveSentinel(rawText) }
+      if (msg.role !== 'assistant') continue
+      const baData = extractBADataFromParts(msg.parts)
+      if (!baData) continue
+      if (baData.phase) phase = baData.phase
+      if ((baData.questions ?? []).length > 0) {
+        lastMsgId = msg.id
+        lastQuestions = baData.questions as BAQuestion[]
       }
-
-      const { displayText, phase: msgPhase, questions: msgQuestions, brief: msgBrief } = parseSentinel(rawText)
-
-      if (msgPhase) phase = msgPhase
-      lastQuestions = msgQuestions ?? []
-
-      return { msg, displayText, brief: msgBrief }
-    })
+    }
 
     return {
-      processed: result,
       currentPhase: phase,
-      activeQuestions: isActive ? [] : lastQuestions,
+      lastQuestionsMessageId: isActive ? undefined : lastMsgId,
+      hasActiveQuestions: !isActive && lastMsgId !== undefined,
+      restoredAnswered: restored,
+      restoredAnswerMsgIds: answerUserMsgIds,
     }
   }, [messages, status])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, activeQuestions])
+  }, [messages])
 
   const notifyFirstMessage = useCallback(() => {
     if (!hasSentFirst.current) {
@@ -604,12 +642,29 @@ function BAChatInner({ threadId, loadExisting, onFirstMessage }: {
     }
   }, [onFirstMessage])
 
+  useEffect(() => {
+    if (pendingAnswer.current && messages.length > 0) {
+      const last = messages[messages.length - 1]
+      if (last.role === 'user') {
+        setAnswerMsgIds((prev) => new Set(prev).add(last.id))
+        pendingAnswer.current = false
+      }
+    }
+  }, [messages])
+
   const handleAnswers = useCallback(
-    (answers: Record<string, string | string[]>) => {
-      const lines = Object.entries(answers).map(([, val]) =>
-        Array.isArray(val) ? val.join(', ') : val,
-      )
+    (msgId: string, questions: BAQuestion[], answers: Record<string, string | string[]>) => {
+      setAnsweredMap((prev) => ({ ...prev, [msgId]: { questions, answers } }))
+
+      const lines: string[] = []
+      for (const q of questions) {
+        const val = answers[q.id]
+        const display = Array.isArray(val) ? val.join(', ') : val
+        if (display) lines.push(`${q.question}: ${display}`)
+      }
       const text = lines.join('\n')
+
+      pendingAnswer.current = true
       sendMessage({ text })
       notifyFirstMessage()
     },
@@ -663,15 +718,14 @@ function BAChatInner({ threadId, loadExisting, onFirstMessage }: {
           </div>
           <div>
             <h1 className={styles.title}>BA Brainstorm</h1>
-            <p className={styles.subtitle}>BMAD · claude-haiku-4-5 via OpenRouter · research agent</p>
+            <p className={styles.subtitle}>BMAD · claude-sonnet-4.6 via OpenRouter · web search</p>
           </div>
         </div>
         <PhaseBar current={currentPhase} />
       </header>
 
-      {/* Body: chat column + right questions panel */}
+      {/* Body: chat column ── */}
       <div className={styles.body}>
-        {/* ── Left: chat column ── */}
         <div className={styles.chatArea}>
           {/* Messages */}
           <main className={styles.messages}>
@@ -687,58 +741,131 @@ function BAChatInner({ threadId, loadExisting, onFirstMessage }: {
           </div>
         )}
 
-        {processed.map(({ msg, displayText, brief }) => (
-          <div
-            key={msg.id}
-            className={`${styles.row} ${msg.role === 'user' ? styles.userRow : styles.assistantRow}`}
-          >
-            {msg.role === 'assistant' && (
-              <div className={styles.msgAvatar}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="2" y="3" width="20" height="14" rx="2" />
-                  <line x1="8" y1="21" x2="16" y2="21" />
-                  <line x1="12" y1="17" x2="12" y2="21" />
-                </svg>
-              </div>
-            )}
-            <div className={styles.bubbleCol}>
-              {/* Tool call cards (assistant only) */}
-              {msg.role === 'assistant' && msg.parts.filter(isToolCallPart).map((part, i) => (
-                <ToolCallCard key={(part as ToolPartLike).toolCallId ?? i} part={part as ToolPartLike} />
-              ))}
+        {messages.map((msg) => {
+          const isLastQuestionsMsg = msg.id === lastQuestionsMessageId
 
-              {/* Image preview (user messages with file parts) */}
-              {msg.role === 'user' && msg.parts
-                .filter((p): p is { type: 'file'; mediaType: string; url: string } =>
-                  p.type === 'file' && (p as { mediaType?: string }).mediaType?.startsWith('image/') === true
-                )
-                .map((fp, i) => (
-                  <img key={i} src={fp.url} alt="Attached" className={styles.imagePreview} />
-                ))
-              }
+          const isAnswerMsg = msg.role === 'user' && (
+            answerMsgIds.has(msg.id) ||
+            restoredAnswerMsgIds.has(msg.id) ||
+            (pendingAnswer.current && msg === messages[messages.length - 1])
+          )
+          if (isAnswerMsg) return null
 
-              {/* Text bubble */}
-              {(displayText || msg.role === 'assistant') && (
-                <div className={`${styles.bubble} ${msg.role === 'user' ? styles.userBubble : styles.assistantBubble}`}>
-                  {displayText ? (
-                    msg.role === 'assistant' ? (
-                      <MarkdownMessage content={displayText} accentColor="var(--ba-accent)" />
-                    ) : (
-                      displayText
-                    )
-                  ) : (
-                    msg.role === 'assistant' && msg.parts.filter(isToolCallPart).length === 0
-                      ? <span className={styles.typing}><span /><span /><span /></span>
-                      : null
-                  )}
+          return (
+            <div
+              key={msg.id}
+              className={`${styles.row} ${msg.role === 'user' ? styles.userRow : styles.assistantRow}`}
+            >
+              {msg.role === 'assistant' && (
+                <div className={styles.msgAvatar}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="2" y="3" width="20" height="14" rx="2" />
+                    <line x1="8" y1="21" x2="16" y2="21" />
+                    <line x1="12" y1="17" x2="12" y2="21" />
+                  </svg>
                 </div>
               )}
+              <div className={styles.bubbleCol}>
+                {/* Image preview (user messages with file parts) */}
+                {msg.role === 'user' && msg.parts
+                  .filter((p): p is { type: 'file'; mediaType: string; url: string } =>
+                    p.type === 'file' && (p as { mediaType?: string }).mediaType?.startsWith('image/') === true
+                  )
+                  .map((fp, i) => (
+                    <img key={i} src={fp.url} alt="Attached" className={styles.imagePreview} />
+                  ))
+                }
 
-              {/* Product brief */}
-              {brief && <BriefCard brief={brief} />}
+                {/* Render parts in the order the LLM returned them */}
+                {(() => {
+                  let hasRendered = false
+                  return msg.parts.map((part, i) => {
+                    if (part.type === 'step-start') return null
+
+                    if (part.type === 'text') {
+                      const text = (part as { type: 'text'; text: string }).text
+                      if (!text && msg.role !== 'assistant') return null
+                      hasRendered = true
+                      return (
+                        <div
+                          key={i}
+                          className={`${styles.bubble} ${msg.role === 'user' ? styles.userBubble : styles.assistantBubble}`}
+                        >
+                          {text ? (
+                            msg.role === 'assistant' ? (
+                              <MarkdownMessage content={text} accentColor="var(--ba-accent)" />
+                            ) : (
+                              text
+                            )
+                          ) : null}
+                        </div>
+                      )
+                    }
+
+                    const toolInv = getToolInvocationFromPart(part as Record<string, unknown>)
+                    if (toolInv) {
+                      if (toolInv.toolName === 'askQuestions') {
+                        const isMessageAnswered = !!(answeredMap[msg.id] ?? restoredAnswered[msg.id])
+                        if (!toolInv.isDone && isStreaming && !isMessageAnswered) {
+                          hasRendered = true
+                          return (
+                            <div key={toolInv.toolCallId || i} className={styles.preparingQuestions}>
+                              <span className={styles.searchSpinner} />
+                              <span>Preparing questions…</span>
+                            </div>
+                          )
+                        }
+                        return null
+                      }
+                      hasRendered = true
+                      return <ToolCallCard key={toolInv.toolCallId || i} inv={toolInv} />
+                    }
+
+                    if (part.type === 'data-ba-questions' && msg.role === 'assistant') {
+                      const data = (part as { type: string; data: BADataPart }).data
+                      const brief = data?.brief
+                      if (brief) {
+                        hasRendered = true
+                        return <BriefCard key={i} brief={brief} />
+                      }
+
+                      const answered = answeredMap[msg.id] ?? restoredAnswered[msg.id]
+                      if (answered && (data?.questions ?? []).length > 0) {
+                        hasRendered = true
+                        return (
+                          <AnsweredQuestionsCard
+                            key={i}
+                            questions={answered.questions}
+                            answers={answered.answers}
+                          />
+                        )
+                      }
+
+                      if (isLastQuestionsMsg && !isStreaming && (data?.questions ?? []).length > 0) {
+                        hasRendered = true
+                        return (
+                          <QuestionsPanel
+                            key={i}
+                            questions={data.questions}
+                            onSubmit={(answers) => handleAnswers(msg.id, data.questions, answers)}
+                            disabled={isStreaming}
+                          />
+                        )
+                      }
+                      return null
+                    }
+
+                    return null
+                  }).concat(
+                    msg.role === 'assistant' && isStreaming && !hasRendered
+                      ? [<div key="typing" className={`${styles.bubble} ${styles.assistantBubble}`}><span className={styles.typing}><span /><span /><span /></span></div>]
+                      : []
+                  )
+                })()}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
 
         {error && (
           <div className={styles.errorBanner}>
@@ -789,49 +916,39 @@ function BAChatInner({ threadId, loadExisting, onFirstMessage }: {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              activeQuestions.length > 0
+              hasActiveQuestions
                 ? 'Or type a free-form response…'
                 : 'Describe your idea or ask anything…'
             }
             disabled={isStreaming}
           />
-          <button
-            type="submit"
-            className={styles.sendBtn}
-            disabled={isStreaming || (!input.trim() && !imageData)}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
+          {isStreaming ? (
+            <button
+              type="button"
+              className={styles.stopBtn}
+              onClick={stop}
+              aria-label="Stop"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className={styles.sendBtn}
+              disabled={!input.trim() && !imageData}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          )}
         </form>
-        <p className={styles.footerNote}>BA Brainstorm · BMAD method · Powered by claude-haiku-4-5 via OpenRouter</p>
+        <p className={styles.footerNote}>BA Brainstorm · BMAD method · Powered by claude-sonnet-4.6 via OpenRouter</p>
         </footer>
         </div>{/* end chatArea */}
-
-        {/* ── Right: questions panel ── */}
-        <aside className={styles.sidePanel}>
-          {activeQuestions.length > 0 ? (
-            <QuestionsPanel
-              questions={activeQuestions}
-              onSubmit={handleAnswers}
-              disabled={isStreaming}
-            />
-          ) : (
-            <div className={styles.sidePanelEmpty}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                <path d="M12 17h.01" />
-              </svg>
-              <p className={styles.sidePanelEmptyTitle}>Questions panel</p>
-              <p className={styles.sidePanelEmptyHint}>
-                As we work through each phase, I&apos;ll ask you questions here to refine your idea.
-              </p>
-            </div>
-          )}
-        </aside>
 
       </div>{/* end body */}
     </div>
